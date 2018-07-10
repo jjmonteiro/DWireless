@@ -11,9 +11,7 @@
 
 
 //define constants and vars
-#define SLEEP_PERIOD 20e6
-#define REPEAT_EVERY_1000ms 1000
-#define REPEAT_EVERY_50ms 50
+#define SLEEP_PERIOD 20e6	//20 seconds
 #define TASK_RUN_TWICE 2
 
 const char* ssid = "(-_-)";
@@ -45,10 +43,10 @@ void t4Callback();
 
 //Tasks
 
-Task t1(REPEAT_EVERY_1000ms, TASK_FOREVER, &t1Callback);		//reexecuta ao fim de 1s
-Task t2(REPEAT_EVERY_1000ms, TASK_RUN_TWICE, &t2Callback);
-Task t3(REPEAT_EVERY_50ms, TASK_FOREVER, &t3Callback);
-Task t4(REPEAT_EVERY_50ms, TASK_FOREVER, &t4Callback);
+Task t1(2000, TASK_FOREVER, &t1Callback);		//re-run after 2sec, forever
+Task t2(1000, TASK_RUN_TWICE, &t2Callback);
+Task t3(50, TASK_FOREVER, &t3Callback);
+Task t4(50, TASK_FOREVER, &t4Callback);
 
 //Objects
 
@@ -109,13 +107,14 @@ void t4Callback() {
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {///////////////////// aqui vai ficar o CLI //////////////
-	Serial.print("Message arrived [");
+	Serial.print("Message arrived: Topic [");
 	Serial.print(topic);
-	Serial.print("] ");
-	for (int i = 0; i < length; i++) {
+	Serial.print("] :: Payload [");
+	/*for (int i = 0; i < length; i++) {
 		Serial.print((char)payload[i]);
-	}
-	Serial.println();
+	}*/
+	Serial.println(PtrToString(payload));
+	//Serial.println();
 
 	// Switch on the LED if an 1 was received as first character
 	if ((char)payload[0] == '1') {
@@ -133,10 +132,20 @@ void callback(char* topic, byte* payload, unsigned int length) {////////////////
 
 }
 
+String PtrToString(uint8_t *str) {
+	String result;
+	byte *p = str;
+	while (*p) {
+		result += char(*p);
+		p++;
+	}
+	return result;
+}
+
 void reconnect() {
 	// Loop until we're reconnected
 	//if (!client.connected()) {
-		Serial.print("Attempting MQTT connection...");
+		Serial.println("Attempting MQTT connection...");
 		// Create a random client ID
 		String clientId = "ESP8266Client-";
 		clientId += String(random(0xffff), HEX);
