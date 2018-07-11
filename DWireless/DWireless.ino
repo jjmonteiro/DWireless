@@ -17,19 +17,20 @@
 const char* ssid = "(-_-)";
 const char* password = "monteiro";
 
-/**** cloudmqtt.com ****
+//**** cloudmqtt.com ****
 const char* mqtt_server = "m20.cloudmqtt.com";
 const char* mqtt_user = "lgnnlude";
 const char* mqtt_password = "iWg6ghr1pMLO";
 const int   mqtt_port = 17283;
-*/
+String MQTT_ID, topic, payload;
 
-//**** thingspeak.com ****
+
+/**** thingspeak.com ****
 const char* mqtt_server = "mqtt.thingspeak.com";
 const char* mqtt_user = "jjrmonteiro";
 const char* mqtt_password = "Monteir0";
 const char* mqtt_topic = "channels/531644/publish/HLOWA390NM8VXY7H";
-const int   mqtt_port = 1883;
+const int   mqtt_port = 1883;*/
 
 
 long lastMsg = 0;
@@ -60,17 +61,23 @@ void t1Callback() {
 	Serial.print("t1: ");
 	Serial.println(millis());
 
-	//*** MQTT PUBLISH //***
+	//*** MQTT PUBLISH //***	
 	Serial.println("Publishing messages..");
-	/*
-	snprintf(msg, 75, "Voltage: %ld", ESP.getVcc());
-	client.publish("ClientID", msg);
-	snprintf(msg, 75, "Signal: %ld", WiFi.RSSI());
-	client.publish("outTopic", msg);
-	snprintf(msg, 75, "RAM: %ld", ESP.getFreeHeap());
-	client.publish("outTopic", msg);
-	*/
 
+	//*** cloudmqtt ***
+
+	topic = MQTT_ID + "/Voltage";
+	payload = String(ESP.getVcc());
+	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
+	topic = MQTT_ID + "/Signal";
+	payload = String(WiFi.RSSI());
+	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
+	topic = MQTT_ID + "/FreeHeap";
+	payload = String(ESP.getFreeHeap());
+	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
+	
+
+	/*** thingspeak
 	String payload = "field1=";
 	payload += String((float)ESP.getVcc() / 1024);
 	payload += "&field2=";
@@ -78,12 +85,12 @@ void t1Callback() {
 	payload += "&field3=";
 	payload += WiFi.RSSI();
 	payload += "&status=MQTTPUBLISH";
-
-	client.publish(mqtt_topic, payload.c_str());
+	client.publish(mqtt_topic, payload.c_str());*/
 
 	//*** MQTT SUBSCRIBE //***
-
-	client.subscribe("inTopic");
+	Serial.println("Subscribing messages..");
+	topic = MQTT_ID + "/Command";
+	Serial.println(client.subscribe(topic.c_str()));
 }
 
 void t2Callback() {
@@ -92,6 +99,10 @@ void t2Callback() {
 	
 	if (t2.isLastIteration()) {
 		Serial.println("t2: terminating and going to sleep.");
+		client.disconnect();
+		runner.disableAll();
+		delay(200);
+		WiFi.disconnect();
 		ESP.deepSleep(SLEEP_PERIOD);
 	}
 }
@@ -106,59 +117,71 @@ void t4Callback() {
 	Serial.println(millis());
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {///////////////////// aqui vai ficar o CLI //////////////
-	Serial.print("Message arrived: Topic [");
-	Serial.print(topic);
+void callback(char* in_topic, byte* in_payload, unsigned int length) {///////////////////// aqui vai ficar o CLI //////////////
+	String command = PtrToString(in_payload, length);
+	topic = MQTT_ID + "/Reply";
+	payload = "Unknown command.";	//default output
+
+	Serial.print("Last Message on Topic [");
+	Serial.print(in_topic);
 	Serial.print("] :: Payload [");
-	/*for (int i = 0; i < length; i++) {
-		Serial.print((char)payload[i]);
-	}*/
-	Serial.println(PtrToString(payload));
-	//Serial.println();
+	Serial.print(command);
+	Serial.println("]");
+
+	Serial.print("> ");
 
 	// Switch on the LED if an 1 was received as first character
-	if ((char)payload[0] == '1') {
+	if (command == "server_on") {
 		digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on (Note that LOW is the voltage level
-		Serial.println("Server status: ON");
-		// but actually the LED is on; this is because
-		// it is acive low on the ESP-01)
-
+		payload = "Server status: ON";
 	}
-	else {
+	if (command == "server_off") {
 		digitalWrite(LED_BUILTIN, HIGH);  // Turn the LED off by making the voltage HIGH
-		Serial.println("Server status: OFF");
-
+		payload = "Server status: OFF";
+	}
+	if (command == "ip_addr") {
+		payload = WiFi.localIP().toString();
+	}
+	if (command == "sleep_off") {
+		t2.disable();
+		payload = "Deep sleep status: OFF";
+	}
+	if (command == "sleep_on") {
+		t2.enable();
+		payload = "Deep sleep status: ON";
 	}
 
+	Serial.println(payload);
+	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
 }
 
-String PtrToString(uint8_t *str) {
+String PtrToString(uint8_t *str, unsigned int len) {
 	String result;
-	byte *p = str;
-	while (*p) {
-		result += char(*p);
-		p++;
+	for (int i = 0; i < len; i++) {
+		result += ((char)str[i]);
 	}
 	return result;
 }
 
 void reconnect() {
-	// Loop until we're reconnected
-	//if (!client.connected()) {
-		Serial.println("Attempting MQTT connection...");
-		// Create a random client ID
-		String clientId = "ESP8266Client-";
-		clientId += String(random(0xffff), HEX);
-		// Attempt to connect
-		if (client.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
-			Serial.println("Connected to MQTT server!");
-		}
-		else {
-			Serial.print("Connection failed, rc=");
-			Serial.println(client.state());
-			t1.disable();
-		}
-	//}
+
+	Serial.println("Attempting MQTT connection...");
+	// Create a random client ID
+	// String clientId = "ESP8266Client-";
+	// clientId += String(random(0xffff), HEX);
+	// Attempt to connect
+	// boolean connect (clientID, username, password, willTopic, willQoS, willRetain, willMessage)
+	topic = MQTT_ID + "/Status";
+	if (client.connect(MQTT_ID.c_str(), mqtt_user, mqtt_password, topic.c_str(), 1, true, "CONNECTION_LOST")) {
+		Serial.println("Connected to MQTT server!");
+		Serial.println(client.publish(topic.c_str(), "CONNECTION_START", true));
+	}
+	else {
+		Serial.print("Connection failed, rc=");
+		Serial.println(client.state());
+		t1.disable();
+	}
+
 }
 
 void setup_wifi() {
@@ -180,6 +203,7 @@ void setup_wifi() {
 	Serial.println(WiFi.RSSI());
 	Serial.print("MAC address: ");
 	Serial.println(WiFi.macAddress());
+	MQTT_ID = WiFi.macAddress();
 }
 
 void setup() {
@@ -239,7 +263,7 @@ void loop() {
 	if (!client.connected()) {
 		reconnect();
 	}
-
+	yield();
 	client.loop();
 	runner.execute();
 }
