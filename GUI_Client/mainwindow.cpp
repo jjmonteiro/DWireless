@@ -72,31 +72,18 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_buttonConnect_clicked()
 {
-  qDebug()<<"state before: "<<m_client->state();
   if (m_client->state() == QMqttClient::Disconnected)
   {
-    ui->lineEditHost->setEnabled(false);
-    ui->spinBoxPort->setEnabled(false);
-    ui->buttonConnect->setText(tr("Disconnect"));
-
     m_client->setUsername("lgnnlude");
     m_client->setPassword("iWg6ghr1pMLO");
     m_client->setHostname("m20.cloudmqtt.com");
     m_client->setPort(17283);
     m_client->setClientId("Ruben_pc");
-
     m_client->connectToHost();
   }
   else if(m_client->state() == QMqttClient::Connected)
   {
-    ui->lineEditHost->setEnabled(true);
-    ui->spinBoxPort->setEnabled(true);
-    ui->buttonConnect->setText(tr("Connect"));
     m_client->disconnectFromHost();
-  }
-  else
-  {
-    qDebug()<<"Client state: "<<m_client->state();
   }
 }
 
@@ -107,8 +94,33 @@ void MainWindow::on_buttonQuit_clicked()
 
 void MainWindow::updateLogStateChange()
 {
-  const QString content = QDateTime::currentDateTime().toString() +
-      QLatin1String(": State Change") + QString::number(m_client->state()) + QLatin1Char('\n');
+  QString state = "";
+  switch(m_client->state())
+  {
+    case QMqttClient::Connected:
+      ui->lineEditHost->setEnabled(false);
+      ui->spinBoxPort->setEnabled(false);
+      ui->buttonConnect->setEnabled(true);
+      ui->buttonConnect->setText(tr("Disconnect"));
+      state = "Connected";
+      break;
+
+    case QMqttClient::Disconnected:
+      ui->lineEditHost->setEnabled(false);
+      ui->spinBoxPort->setEnabled(true);
+      ui->buttonConnect->setEnabled(true);
+      ui->buttonConnect->setText(tr("Connect"));
+      state = "Disconnected";
+      break;
+
+    case QMqttClient::Connecting:
+      ui->lineEditHost->setEnabled(false);
+      ui->spinBoxPort->setEnabled(true);
+      ui->buttonConnect->setEnabled(false);
+      state = "Connecting";
+  }
+
+  const QString content = QDateTime::currentDateTime().toString() + QLatin1String(": State Change: ") + state + QLatin1Char('\n');
   ui->editLog->insertPlainText(content);
 }
 
