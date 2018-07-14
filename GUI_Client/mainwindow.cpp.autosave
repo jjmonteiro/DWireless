@@ -72,7 +72,6 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_buttonConnect_clicked()
 {
-  qDebug()<<"state before: "<<m_client->state();
   if (m_client->state() == QMqttClient::Disconnected)
   {
     ui->lineEditHost->setEnabled(false);
