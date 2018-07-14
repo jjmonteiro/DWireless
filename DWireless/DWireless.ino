@@ -13,39 +13,37 @@
 //define constants and vars
 #define SLEEP_PERIOD 20e6	//20 seconds
 #define TASK_RUN_TWICE 2
+#define SENSOR "SENSOR"
+#define STATUS "STATUS"
 
-const char* ssid = "(-_-)";
-const char* password = "monteiro";
+//**** NETWORK CREDENTIALS
+char* ssid;
+char* password;
 
-//**** cloudmqtt.com ****
-const char* mqtt_server = "m20.cloudmqtt.com";
-const char* mqtt_user = "lgnnlude";
-const char* mqtt_password = "iWg6ghr1pMLO";
-const int   mqtt_port = 17283;
-String MQTT_ID, topic, payload;
+//**** SERVER INFO [cloudmqtt.com] ****
+const char* mqtt_server;
+const char* mqtt_user;
+const char* mqtt_password;
+int mqtt_port;
 
+//**** DEVICE IDENTIFIERS
+const char* MAC;
+const char* NAME;
+const char* TYPE;
+const char* ZONE;
+String defaultTopic;
 
-/**** thingspeak.com ****
-const char* mqtt_server = "mqtt.thingspeak.com";
-const char* mqtt_user = "jjrmonteiro";
-const char* mqtt_password = "Monteir0";
-const char* mqtt_topic = "channels/531644/publish/HLOWA390NM8VXY7H";
-const int   mqtt_port = 1883;*/
-
-
-long lastMsg = 0;
-char msg[50];
 
 // Callback methods prototypes
 void t1Callback();
-void t2Callback();
+void deepSleepCallback();
 void t3Callback();
 void t4Callback();
 
 //Tasks
 
 Task t1(2000, TASK_FOREVER, &t1Callback);		//re-run after 2sec, forever
-Task t2(1000, TASK_RUN_TWICE, &t2Callback);
+Task deepSleep(1000, TASK_RUN_TWICE, &deepSleepCallback);
 Task t3(50, TASK_FOREVER, &t3Callback);
 Task t4(50, TASK_FOREVER, &t4Callback);
 
@@ -65,40 +63,57 @@ void t1Callback() {
 	Serial.println("Publishing messages..");
 
 	//*** cloudmqtt ***
+	String payload;
+	int fail = 0;
 
-	topic = MQTT_ID + "/Voltage";
-	payload = String(ESP.getVcc());
-	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
-	topic = MQTT_ID + "/Signal";
+	payload = String((float)ESP.getVcc()/1024);
+	fail += !client.publish((defaultTopic + "/VOLTAGE").c_str(), payload.c_str(), true);
+
 	payload = String(WiFi.RSSI());
-	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
-	topic = MQTT_ID + "/FreeHeap";
-	payload = String(ESP.getFreeHeap());
-	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
-	
+	fail += !client.publish((defaultTopic + "/SIGNAL").c_str(), payload.c_str(), true);
 
-	/*** thingspeak
-	String payload = "field1=";
-	payload += String((float)ESP.getVcc() / 1024);
-	payload += "&field2=";
-	payload += String((float)ESP.getFreeHeap() / 1024);
-	payload += "&field3=";
-	payload += WiFi.RSSI();
-	payload += "&status=MQTTPUBLISH";
-	client.publish(mqtt_topic, payload.c_str());*/
+	payload = String((float)ESP.getFreeHeap()/1024);
+	fail += !client.publish((defaultTopic + "/MEMORY").c_str(), payload.c_str(), true);
+	
+	payload = String((float)ESP.getFreeHeap() / 1111);
+	fail += !client.publish((defaultTopic + "/PHOTOCELL").c_str(), payload.c_str(), true);
+
+	payload = String((float)ESP.getFreeHeap() / 2222);
+	fail += !client.publish((defaultTopic + "/THERMAL").c_str(), payload.c_str(), true);
+
+	payload = String("FALSE");
+	fail += !client.publish((defaultTopic + "/ALARM").c_str(), payload.c_str(), true);
+
+	payload = String("FALSE");
+	fail += !client.publish((defaultTopic + "/FAULT").c_str(), payload.c_str(), true);
+
+	payload = String("FALSE");
+	fail += !client.publish((defaultTopic + "/DISABLED").c_str(), payload.c_str(), true);
+
+	if (fail) {
+		Serial.println("One or more publications failed.");
+		fail = 0;
+	}
+
 
 	//*** MQTT SUBSCRIBE //***
 	Serial.println("Subscribing messages..");
-	topic = MQTT_ID + "/Command";
-	Serial.println(client.subscribe(topic.c_str()));
+
+	fail += !client.subscribe((defaultTopic + "/REQUEST").c_str());
+
+	if (fail) {
+		Serial.println("One or more subscriptions failed.");
+		fail = 0;
+	}
 }
 
-void t2Callback() {
+void deepSleepCallback() {
 	Serial.print("t2: ");
 	Serial.println(millis());
 	
-	if (t2.isLastIteration()) {
+	if (deepSleep.isLastIteration()) {
 		Serial.println("t2: terminating and going to sleep.");
+		client.publish((defaultTopic + "/STATUS").c_str(), "CONNECTION_CLOSE", true);
 		client.disconnect();
 		runner.disableAll();
 		delay(200);
@@ -119,8 +134,7 @@ void t4Callback() {
 
 void callback(char* in_topic, byte* in_payload, unsigned int length) {///////////////////// aqui vai ficar o CLI //////////////
 	String command = PtrToString(in_payload, length);
-	topic = MQTT_ID + "/Reply";
-	payload = "Unknown command.";	//default output
+	String payload = "Unknown command.";	//default output
 
 	Serial.print("Last Message on Topic [");
 	Serial.print(in_topic);
@@ -130,29 +144,34 @@ void callback(char* in_topic, byte* in_payload, unsigned int length) {//////////
 
 	Serial.print("> ");
 
-	// Switch on the LED if an 1 was received as first character
 	if (command == "server_on") {
-		digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on (Note that LOW is the voltage level
-		payload = "Server status: ON";
+		digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on by making the voltage LOW
+		payload = "Server: ON, Deepsleep: OFF";
+		deepSleep.disable();
 	}
 	if (command == "server_off") {
 		digitalWrite(LED_BUILTIN, HIGH);  // Turn the LED off by making the voltage HIGH
-		payload = "Server status: OFF";
+		payload = "Server: OFF, Deepsleep: ON";
+		deepSleep.enable();
 	}
 	if (command == "ip_addr") {
 		payload = WiFi.localIP().toString();
 	}
 	if (command == "sleep_off") {
-		t2.disable();
-		payload = "Deep sleep status: OFF";
+		deepSleep.disable();
+		payload = "Deepsleep: OFF";
 	}
 	if (command == "sleep_on") {
-		t2.enable();
-		payload = "Deep sleep status: ON";
+		deepSleep.enable();
+		payload = "Deepsleep: ON";
+	}
+	if (command == "") {
+		return;
 	}
 
 	Serial.println(payload);
-	Serial.println(client.publish(topic.c_str(), payload.c_str(), true));
+	Serial.println(client.publish((defaultTopic + "/REPLY").c_str(), payload.c_str(), false));
+	Serial.println(client.publish((defaultTopic + "/REQUEST").c_str(), "", false));
 }
 
 String PtrToString(uint8_t *str, unsigned int len) {
@@ -167,14 +186,18 @@ void reconnect() {
 
 	Serial.println("Attempting MQTT connection...");
 	// Create a random client ID
-	// String clientId = "ESP8266Client-";
-	// clientId += String(random(0xffff), HEX);
+	String clientId = "ESP01_";
+	clientId += String(random(0xffff), HEX);
 	// Attempt to connect
 	// boolean connect (clientID, username, password, willTopic, willQoS, willRetain, willMessage)
-	topic = MQTT_ID + "/Status";
-	if (client.connect(MQTT_ID.c_str(), mqtt_user, mqtt_password, topic.c_str(), 1, true, "CONNECTION_LOST")) {
+	Serial.println(clientId);
+	Serial.println(mqtt_user);
+	Serial.println(mqtt_password);
+	Serial.println(defaultTopic + "/STATUS");
+
+	if (client.connect(clientId.c_str(), mqtt_user, mqtt_password, (defaultTopic + "/STATUS").c_str(), 1, true, "CONNECTION_LOST")) {
 		Serial.println("Connected to MQTT server!");
-		Serial.println(client.publish(topic.c_str(), "CONNECTION_START", true));
+		client.publish((defaultTopic + "/STATUS").c_str(), "CONNECTION_START", true);
 	}
 	else {
 		Serial.print("Connection failed, rc=");
@@ -184,8 +207,10 @@ void reconnect() {
 
 }
 
-void setup_wifi() {
-	// We start by connecting to a WiFi network
+void setupWifi() {
+	// extract wifi credentials from eeprom
+	// attempt connection, if fail start autoconfiguration or WPS
+	// when successfull connected, save new credentials
 
 	Serial.print("Connecting to: ");
 	Serial.println(ssid);
@@ -203,9 +228,35 @@ void setup_wifi() {
 	Serial.println(WiFi.RSSI());
 	Serial.print("MAC address: ");
 	Serial.println(WiFi.macAddress());
-	MQTT_ID = WiFi.macAddress();
+
+
 }
 
+void readEepromData() {
+	String sMAC;
+
+	ssid = "(-_-)";
+	password = "monteiro";
+
+	//**** SERVER INFO ****
+	mqtt_server = "m20.cloudmqtt.com";
+	mqtt_user = "lgnnlude";
+	mqtt_password = "iWg6ghr1pMLO";
+	mqtt_port = 17283;
+
+	NAME = "DET_021";
+	TYPE = "PH850";
+	ZONE = "ZONE_1";
+
+	sMAC = WiFi.macAddress();
+	sMAC.replace(":", "");
+	//MAC = sMAC.toCharArray;
+	defaultTopic = sMAC;
+	defaultTopic += "/";
+	defaultTopic += NAME;
+	defaultTopic += "/";
+	defaultTopic += ZONE;
+}
 void setup() {
 
 	Serial.begin(115200);
@@ -231,12 +282,14 @@ void setup() {
 	Serial.println(ESP.getFlashChipSpeed());
 	Serial.println("-------------");
 
-	Serial.println("Initializing Pinmodes..");
+	readEepromData();
+
+	Serial.println("Initializing GPIOs..");
 	pinMode(LED_BUILTIN, OUTPUT);     // Initialize the BUILTIN_LED pin as an output
 	digitalWrite(LED_BUILTIN, HIGH);  // active low
 
 	Serial.println("Initializing WiFi..");
-	setup_wifi();
+	setupWifi();
 	Serial.println("Initializing MQTT Server..");
 	client.setServer(mqtt_server, mqtt_port);
 	client.setCallback(callback);
@@ -246,12 +299,12 @@ void setup() {
 
 	Serial.println("Adding tasks..");
 	runner.addTask(t1);
-	runner.addTask(t2);
+	runner.addTask(deepSleep);
 	runner.addTask(t3);
 	runner.addTask(t4);
 	Serial.println("Enabling tasks..");
 	t1.enable();
-	t2.enable();
+	deepSleep.enable();
 	t3.enable();
 	t4.enable();
 	Serial.println("--Boot Complete--");
